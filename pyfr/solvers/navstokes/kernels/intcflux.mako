@@ -13,7 +13,12 @@
               gradul='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
               gradur='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
               artvisc='in view fpdtype_t'
-              nl='in fpdtype_t[${str(ndims)}]'>
+              nl='in fpdtype_t[${str(ndims)}]'
+% if sgs_model != 'none':
+              delta_e_l='in fpdtype_t'
+              delta_e_r='in fpdtype_t'
+% endif
+              >
     fpdtype_t mag_nl = sqrt(${pyfr.dot('nl[{i}]', i=ndims)});
     fpdtype_t norm_nl[] = ${pyfr.array('(1 / mag_nl)*nl[{i}]', i=ndims)};
 
@@ -21,13 +26,25 @@
     fpdtype_t ficomm[${nvars}], fvcomm;
     ${pyfr.expand('rsolve', 'ul', 'ur', 'norm_nl', 'ficomm')};
 
+% if sgs_model != 'none':
+    // viscous_flux_add reads delta_e from the calling scope; declare
+    // once and assign per side before each invocation.
+    fpdtype_t delta_e;
+% endif
+
 % if beta != -0.5:
+% if sgs_model != 'none':
+    delta_e = delta_e_l;
+% endif
     fpdtype_t fvl[${ndims}][${nvars}] = {{0}};
     ${pyfr.expand('viscous_flux_add', 'ul', 'gradul', 'fvl')};
     ${pyfr.expand('artificial_viscosity_add', 'gradul', 'fvl', 'artvisc')};
 % endif
 
 % if beta != 0.5:
+% if sgs_model != 'none':
+    delta_e = delta_e_r;
+% endif
     fpdtype_t fvr[${ndims}][${nvars}] = {{0}};
     ${pyfr.expand('viscous_flux_add', 'ur', 'gradur', 'fvr')};
     ${pyfr.expand('artificial_viscosity_add', 'gradur', 'fvr', 'artvisc')};

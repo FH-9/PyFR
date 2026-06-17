@@ -8,6 +8,18 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
     # Use the density field for shock sensing
     shockvar = 'rho'
 
+    def get_delta_e_for_inters_np(self, eidxs, fidx):
+        # Per-fpt SGS filter width as a numpy array, in the standard
+        # get_X_for_inters tuple-of-arrays convention consumed by
+        # _const_mat / _get_inter_arrays. Each element's delta_e is
+        # repeated nfp times (one entry per face flux point). Only
+        # valid when self._delta_e_np exists, i.e. when an SGS model
+        # is configured (see set_backend()).
+        nfp = self.nfacefpts[fidx]
+        de_per_ele = self._delta_e_np[eidxs]              # (n_eles,)
+        de_per_fpt = np.repeat(de_per_ele, nfp)           # (n_eles*nfp,)
+        return de_per_fpt,
+
     @staticmethod
     def grad_con_to_pri(cons, grad_cons, cfg):
         rho, *rhouvw = cons[:-1]
@@ -45,6 +57,11 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
         if visc_corr not in {'sutherland', 'none'}:
             raise ValueError('Invalid viscosity-correction option')
 
+        # Sub-grid scale (SGS) model
+        sgs_model = self.cfg.get('solver', 'sgs-model', 'none')
+        if sgs_model not in {'none', 'vreman', 'sigma'}:
+            raise ValueError(f'Invalid sgs-model: {sgs_model!r}')
+
         # Template parameters for the flux kernels
         tplargs = {
             'ndims': self.ndims,
@@ -54,8 +71,41 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
             'jac_exprs': self.basis.jac_exprs,
             'interp_expr': self.basis.interp_expr,
             'shock_capturing': shock_capturing,
-            'visc_corr': visc_corr
+            'visc_corr': visc_corr,
+            'sgs_model': sgs_model
         }
+
+        # SGS-specific tplargs and the per-element filter width
+        if sgs_model != 'none':
+            if sgs_model == 'vreman':
+                tplargs['c_vreman'] = self.cfg.getfloat('solver',
+                                                        'c-vreman', 0.07)
+            elif sgs_model == 'sigma':
+                tplargs['c_sigma'] = self.cfg.getfloat('solver',
+                                                       'c-sigma', 1.35)
+            # Turbulent Prandtl number — read from [constants] if present,
+            # else default to 0.9 (standard compressible-LES value).
+            tplargs['c'].setdefault('Prt', self.cfg.getfloat(
+                'constants', 'Prt', 0.9))
+
+            # Per-element filter width  delta_e = (V_e / N_upts)^(1/d)
+            # with V_e the physical element volume computed by quadrature:
+            #   V_e = sum_q  w_q  |J|_q
+            # using the basis's element-quadrature points and weights.
+            qwts = self.basis._eqrule.wts
+            djac_q = 1.0/self.rcpdjac_at_np('qpts')
+            V_e = np.einsum('i,ij->j', qwts, djac_q)
+            delta_e = (V_e/self.nupts)**(1.0/self.ndims)
+
+            # Per-element backend matrix used by the volume kernel
+            # (tflux) via a broadcast-col argument.
+            self._delta_e_mat = self._be.const_matrix(
+                delta_e[None, :], tags={'align'}
+            )
+
+            # Numpy copy used by get_delta_e_for_inters_np to build the
+            # per-fpt face arrays consumed by the inters classes.
+            self._delta_e_np = delta_e
 
         # Helpers
         r, s = self.mesh_regions, self._slice_mat
@@ -101,6 +151,10 @@ class NavierStokesElements(BaseFluidElements, BaseAdvectionDiffusionElements):
             else:
                 kw['u'] = s(self._scal_qpts, rgn)
                 kw['f'] = s(self._vect_qpts, rgn)
+
+            # SGS filter width (only present when an SGS model is active)
+            if sgs_model != 'none':
+                kw['delta_e'] = s(self._delta_e_mat, rgn)
 
             tdisf.append((ktype, r[rgn], rgn, kw))
 

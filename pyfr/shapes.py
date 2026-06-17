@@ -32,6 +32,23 @@ class BaseShape:
         'quad': lambda order: (order + 1)**2
     }
 
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+
+        # Concrete shape classes get a read-only reference-element volume
+        # centroid (center of mass). For simplices, parallelepipeds, and the
+        # triangular prism this coincides with the arithmetic mean of the
+        # linear-element vertices; for the (square-base) pyramid it does
+        # not, so we set that case analytically — the centroid sits at h/4
+        # from the base, i.e. z = -1/2 in the standard [-1, 1] reference.
+        if cls.name is not None:
+            if cls.name == 'pyr':
+                cent = np.array([0.0, 0.0, -0.5])
+            else:
+                cent = cls.std_ele(1).mean(axis=0)
+            cent.setflags(write=False)
+            cls.std_ele_centroid = cent
+
     def __init__(self, nspts, cfg):
         self.nspts = nspts
         self.cfg = cfg

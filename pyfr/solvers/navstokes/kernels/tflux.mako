@@ -18,7 +18,11 @@
               smats='in fpdtype_t[${str(ndims)}][${str(ndims)}]'
               rcpdjac='in fpdtype_t'
               verts='in broadcast-col fpdtype_t[${str(nverts)}][${str(ndims)}]'
-              upts='in broadcast-row fpdtype_t[${str(ndims)}]'>
+              upts='in broadcast-row fpdtype_t[${str(ndims)}]'
+% if sgs_model != 'none':
+              delta_e='in broadcast-col fpdtype_t'
+% endif
+              >
 % if 'linear' in ktype:
     // Compute the S matrices
     fpdtype_t ${smats}[${ndims}][${ndims}], djac;

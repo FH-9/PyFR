@@ -145,8 +145,15 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         g_grad_flux.add_all(k['iint/comm_flux'],
                             deps=ideps + k['eles/avfill'],
                             pdeps=k['mpiint/vect_fpts_pack'])
+
+        # WMLES: populate per-fpt matching-point primitives before the wall
+        # flux kernels run. No upstream deps — only reads scal_upts[uin],
+        # which is stable for the duration of the rhs call.
+        g_grad_flux.add_all(k['bcint/wmles_matching'])
+
         g_grad_flux.add_all(k['bcint/comm_flux'],
-                            deps=ideps + k['eles/avfill'])
+                            deps=(ideps + k['eles/avfill']
+                                  + k['bcint/wmles_matching']))
 
         # Interpolate the gradients to the quadrature points
         for l in k['eles/gradcoru_qpts']:
