@@ -10,19 +10,11 @@
 <% smats = 'smats_l' if 'linear' in ktype else 'smats' %>
 <% rcpdjac = 'rcpdjac_l' if 'linear' in ktype else 'rcpdjac' %>
 
-<%pyfr:kernel name='tflux' ndim='2'
-              u='in fpdtype_t[${str(nvars)}]'
-              artvisc_vtx='in broadcast-col view(${str(nverts)}) fpdtype_t'
-              f='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
-              gradu='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
-              smats='in fpdtype_t[${str(ndims)}][${str(ndims)}]'
-              rcpdjac='in fpdtype_t'
-              verts='in broadcast-col fpdtype_t[${str(nverts)}][${str(ndims)}]'
-              upts='in broadcast-row fpdtype_t[${str(ndims)}]'
-% if sgs_model != 'none':
-              delta_e='in broadcast-col fpdtype_t'
-% endif
-              >
+## The kernel body is shared; only the argument list differs when an SGS
+## model is active (it gains the per-element filter width delta_e). mako
+## cannot place a `% if` inside a tag's argument list, so the body lives in
+## a def and the tag is emitted in two conditional forms.
+<%def name='tflux_body()'>
 % if 'linear' in ktype:
     // Compute the S matrices
     fpdtype_t ${smats}[${ndims}][${ndims}], djac;
@@ -51,4 +43,30 @@
     f[${i}][${j}] = ${' + '.join(f'{smats}[{i}][{k}]*ftemp[{k}][{j}]'
                                  for k in range(ndims))};
 % endfor
+</%def>
+% if sgs_model != 'none':
+<%pyfr:kernel name='tflux' ndim='2'
+              u='in fpdtype_t[${str(nvars)}]'
+              artvisc_vtx='in broadcast-col view(${str(nverts)}) fpdtype_t'
+              f='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              gradu='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              smats='in fpdtype_t[${str(ndims)}][${str(ndims)}]'
+              rcpdjac='in fpdtype_t'
+              verts='in broadcast-col fpdtype_t[${str(nverts)}][${str(ndims)}]'
+              upts='in broadcast-row fpdtype_t[${str(ndims)}]'
+              delta_e='in broadcast-col fpdtype_t'>
+${tflux_body()}
 </%pyfr:kernel>
+% else:
+<%pyfr:kernel name='tflux' ndim='2'
+              u='in fpdtype_t[${str(nvars)}]'
+              artvisc_vtx='in broadcast-col view(${str(nverts)}) fpdtype_t'
+              f='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              gradu='inout fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              smats='in fpdtype_t[${str(ndims)}][${str(ndims)}]'
+              rcpdjac='in fpdtype_t'
+              verts='in broadcast-col fpdtype_t[${str(nverts)}][${str(ndims)}]'
+              upts='in broadcast-row fpdtype_t[${str(ndims)}]'>
+${tflux_body()}
+</%pyfr:kernel>
+% endif

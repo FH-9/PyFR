@@ -747,3 +747,62 @@ def test_alg_wall_isothermal_not_implemented(openmp_ok):
         _construct_bc(NavierStokesAlgWallBCInters,
                       _ns_cfg(bctype='alg-wall',
                               bc={'thermal-bc': 'isothermal'}))
+
+
+# ===========================================================================
+# Real flux-kernel rendering with SGS.
+#
+# The SGS / wall-model work added a conditional `delta_e` argument to the
+# tflux / intcflux / mpicflux / bccflux kernels.  A `% if` cannot live inside
+# a mako tag's argument list, so the body is factored into a def and the tag
+# emitted in two conditional forms.  These tests render the REAL kernels via
+# the backend (no mesh, no C compilation) for every sgs-model -- guarding the
+# whole "kernel doesn't even lex/render" failure class, which the macro-level
+# tests above do not exercise.
+# ===========================================================================
+
+# Per-kernel tplargs on top of the common set (ndims/nvars/visc_corr/
+# shock_capturing/c/sgs_model are shared).
+_FLUX_KERNELS = {
+    'tflux': dict(nverts=8, ktype=''),
+    'intcflux': dict(rsolver='rusanov'),
+    'mpicflux': dict(rsolver='rusanov'),
+    'bccflux': dict(rsolver='rusanov', bctype='no-slp-adia-wall',
+                    bccfluxstate='ghost-imperm'),
+}
+
+
+def _render_flux_kernel(kern, sgs_model):
+    be = get_backend('openmp', Inifile())
+    be.pointwise.register(f'pyfr.solvers.navstokes.kernels.{kern}')
+    c = {'gamma': 1.4, 'mu': 1e-3, 'Pr': 0.72, 'Prt': 0.9,
+         'ldg-beta': 0.5, 'ldg-tau': 0.1}
+    tpl = dict(ndims=3, nvars=5, sgs_model=sgs_model, c=c,
+               visc_corr='none', shock_capturing='none',
+               **_FLUX_KERNELS[kern])
+    if sgs_model == 'vreman':
+        tpl['c_vreman'] = 0.07
+    elif sgs_model == 'sigma':
+        tpl['c_sigma'] = 1.35
+    src, ndim, argn, argt = be.pointwise._render_kernel(
+        kern, f'pyfr.solvers.navstokes.kernels.{kern}', {}, tpl)
+    return argn
+
+
+@pytest.mark.parametrize('kern', list(_FLUX_KERNELS))
+@pytest.mark.parametrize('sgs_model', ['none', 'vreman', 'sigma'])
+def test_navstokes_flux_kernels_render(openmp_ok, kern, sgs_model):
+    # The kernel must lex + render for every SGS model (this is exactly what
+    # failed when a `% if` was placed inside the tag's argument list).
+    argn = _render_flux_kernel(kern, sgs_model)
+    has_delta = any('delta_e' in a for a in argn)
+    # delta_e appears iff an SGS model is active.
+    assert has_delta == (sgs_model != 'none'), (kern, sgs_model, argn)
+
+
+def test_navstokes_flux_kernels_baseline_has_no_sgs_args(openmp_ok):
+    # ILES (sgs-model = none) must render identically to stock PyFR: no
+    # delta_e arguments anywhere.
+    for kern in _FLUX_KERNELS:
+        argn = _render_flux_kernel(kern, 'none')
+        assert not any('delta_e' in a for a in argn), (kern, argn)

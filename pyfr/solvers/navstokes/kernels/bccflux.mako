@@ -7,15 +7,10 @@
 <%include file='pyfr.solvers.navstokes.kernels.bcs.${bccfluxstate}'/>
 % endif
 
-<%pyfr:kernel name='bccflux' ndim='1'
-              ul='inout view fpdtype_t[${str(nvars)}]'
-              gradul='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
-              artvisc='in view fpdtype_t'
-              nl='in fpdtype_t[${str(ndims)}]'
-% if sgs_model != 'none':
-              delta_e_l='in fpdtype_t'
-% endif
-              >
+## Body shared by both forms; the SGS form gains a delta_e_l argument.
+## mako cannot place a `% if` inside a tag argument list, so the body lives
+## in a def and the tag is emitted in two conditional forms.
+<%def name='bccflux_body()'>
     fpdtype_t mag_nl = sqrt(${pyfr.dot('nl[{i}]', i=ndims)});
     fpdtype_t norm_nl[] = ${pyfr.array('(1 / mag_nl)*nl[{i}]', i=ndims)};
 
@@ -26,4 +21,22 @@
 % endif
 
     ${pyfr.expand('bc_common_flux_state', 'ul', 'gradul', 'artvisc', 'norm_nl', 'mag_nl')};
+</%def>
+% if sgs_model != 'none':
+<%pyfr:kernel name='bccflux' ndim='1'
+              ul='inout view fpdtype_t[${str(nvars)}]'
+              gradul='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              artvisc='in view fpdtype_t'
+              nl='in fpdtype_t[${str(ndims)}]'
+              delta_e_l='in fpdtype_t'>
+${bccflux_body()}
 </%pyfr:kernel>
+% else:
+<%pyfr:kernel name='bccflux' ndim='1'
+              ul='inout view fpdtype_t[${str(nvars)}]'
+              gradul='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              artvisc='in view fpdtype_t'
+              nl='in fpdtype_t[${str(ndims)}]'>
+${bccflux_body()}
+</%pyfr:kernel>
+% endif

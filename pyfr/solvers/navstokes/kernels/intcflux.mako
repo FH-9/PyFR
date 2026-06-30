@@ -7,18 +7,10 @@
 
 <% beta, tau = c['ldg-beta'], c['ldg-tau'] %>
 
-<%pyfr:kernel name='intcflux' ndim='1'
-              ul='inout view fpdtype_t[${str(nvars)}]'
-              ur='inout view fpdtype_t[${str(nvars)}]'
-              gradul='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
-              gradur='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
-              artvisc='in view fpdtype_t'
-              nl='in fpdtype_t[${str(ndims)}]'
-% if sgs_model != 'none':
-              delta_e_l='in fpdtype_t'
-              delta_e_r='in fpdtype_t'
-% endif
-              >
+## Body shared by both forms; the SGS form gains delta_e_l/delta_e_r
+## arguments. mako cannot place a `% if` inside a tag argument list, so the
+## body lives in a def and the tag is emitted in two conditional forms.
+<%def name='intcflux_body()'>
     fpdtype_t mag_nl = sqrt(${pyfr.dot('nl[{i}]', i=ndims)});
     fpdtype_t norm_nl[] = ${pyfr.array('(1 / mag_nl)*nl[{i}]', i=ndims)};
 
@@ -68,4 +60,27 @@
     ul[${i}] =  mag_nl*(ficomm[${i}] + fvcomm);
     ur[${i}] = -mag_nl*(ficomm[${i}] + fvcomm);
 % endfor
+</%def>
+% if sgs_model != 'none':
+<%pyfr:kernel name='intcflux' ndim='1'
+              ul='inout view fpdtype_t[${str(nvars)}]'
+              ur='inout view fpdtype_t[${str(nvars)}]'
+              gradul='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              gradur='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              artvisc='in view fpdtype_t'
+              nl='in fpdtype_t[${str(ndims)}]'
+              delta_e_l='in fpdtype_t'
+              delta_e_r='in fpdtype_t'>
+${intcflux_body()}
 </%pyfr:kernel>
+% else:
+<%pyfr:kernel name='intcflux' ndim='1'
+              ul='inout view fpdtype_t[${str(nvars)}]'
+              ur='inout view fpdtype_t[${str(nvars)}]'
+              gradul='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              gradur='in view fpdtype_t[${str(ndims)}][${str(nvars)}]'
+              artvisc='in view fpdtype_t'
+              nl='in fpdtype_t[${str(ndims)}]'>
+${intcflux_body()}
+</%pyfr:kernel>
+% endif
