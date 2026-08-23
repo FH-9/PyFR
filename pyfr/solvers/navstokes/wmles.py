@@ -174,7 +174,7 @@ class WMLESMatchingMixin:
         # Register the matching kernel template and bind a uin-taking
         # factory (the integrator constructs one per RK register at setup).
         be.pointwise.register(
-            'pyfr.solvers.navstokes.kernels.bcs.wmles-matching'
+            'pyfr.solvers.navstokes.kernels.bcs.wmles_matching'
         )
         self.kernels['wmles_matching'] = self._wmles_make_matching_factory(
             elemap
@@ -287,6 +287,13 @@ class WMLESMatchingMixin:
                     u_match=u_match_view
                 ))
 
-            return kerns
+            # A uin-taking factory must hand back a single kernel (the
+            # system's kernel table uses it as a dict key). Matching groups
+            # write to disjoint regions of the buffer, so their order is
+            # immaterial and an unordered meta-kernel is sufficient.
+            if len(kerns) > 1:
+                return be.unordered_meta_kernel(kerns)
+            else:
+                return kerns[0]
 
         return factory

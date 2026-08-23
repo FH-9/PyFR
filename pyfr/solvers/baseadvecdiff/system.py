@@ -81,6 +81,15 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
         # Make a copy of the solution (if used by source terms)
         g_soln.add_all(k['eles/copy_soln'], deps=k['eles/entropy_filter'])
 
+        # WMLES: sample the matching-point primitives out of scal_upts[uin].
+        # This has to happen here, in the first graph, because the integrator
+        # may alias the input and output registers (uin == fout); by the time
+        # the later graphs run they have overwritten the solution we need to
+        # read. Ordering against the wall flux kernels that consume the
+        # buffer is then implied by the sequencing of the graphs themselves.
+        g_soln.add_all(k['bcint/wmles_matching'],
+                       deps=k['eles/entropy_filter'])
+
         # Compute the common solution at our internal/boundary interfaces
         for l in k['eles/copy_fpts']:
             g_soln.add(l, deps=deps(l, 'eles/disu'))
@@ -146,14 +155,8 @@ class BaseAdvectionDiffusionSystem(BaseAdvectionSystem):
                             deps=ideps + k['eles/avfill'],
                             pdeps=k['mpiint/vect_fpts_pack'])
 
-        # WMLES: populate per-fpt matching-point primitives before the wall
-        # flux kernels run. No upstream deps — only reads scal_upts[uin],
-        # which is stable for the duration of the rhs call.
-        g_grad_flux.add_all(k['bcint/wmles_matching'])
-
         g_grad_flux.add_all(k['bcint/comm_flux'],
-                            deps=(ideps + k['eles/avfill']
-                                  + k['bcint/wmles_matching']))
+                            deps=ideps + k['eles/avfill'])
 
         # Interpolate the gradients to the quadrature points
         for l in k['eles/gradcoru_qpts']:

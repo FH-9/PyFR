@@ -9,7 +9,7 @@
     // element: u_c[v] = sum_k interp[k] * u_volume[k][v]
     fpdtype_t u_c[${nvars}];
 % for v in range(nvars):
-    u_c[${v}] = ${pyfr.dot('interp[{k}]*u_volume[{k}][' + str(v) + ']',
+    u_c[${v}] = ${pyfr.dot('interp[{k}]', 'u_volume[{k}][' + str(v) + ']',
                            k=nupts)};
 % endfor
 
@@ -22,7 +22,7 @@
     // Slot 0: density (taken directly from the interpolated conservatives
     // — no EOS conversion needed). Slot ndims+1: pressure via ideal-gas
     // EOS p = (gamma-1)(E - 0.5 rho |v|^2).
-    fpdtype_t v2 = ${pyfr.dot('u_c[{i}]*u_c[{i}]', i=(1, ndims + 1))}
+    fpdtype_t v2 = ${pyfr.dot('u_c[{i}]', i=(1, ndims + 1))}
                    *rcprho*rcprho;
     u_match[0][0] = u_c[0];
     u_match[${ndims + 1}][0] = ${c['gamma'] - 1}*(u_c[${ndims + 1}]
