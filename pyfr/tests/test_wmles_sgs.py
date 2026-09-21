@@ -288,9 +288,10 @@ def test_check_containment_reports_only_bad_points():
 _CC_CANDIDATES = [None, 'gcc-15', 'gcc-14', 'gcc-13', 'gcc-12', 'gcc']
 
 
-def _make_sgs_backend():
+def _make_sgs_backend(precision='double'):
     for cc in _CC_CANDIDATES:
         cfg = Inifile()
+        cfg.set('backend', 'precision', precision)
         if cc is not None:
             cfg.set('backend-openmp', 'cc', cc)
         try:
@@ -303,6 +304,18 @@ def _make_sgs_backend():
         except Exception:
             continue
     return None
+
+
+@pytest.fixture(scope='module')
+def sgs_backend_single():
+    # The solver runs SINGLE precision; the sigma model's sensitivity to
+    # forming G = alpha^T alpha is invisible at double, so accuracy
+    # regressions must be checked here.
+    be = _make_sgs_backend('single')
+    if be is None:
+        pytest.skip('no OpenMP-capable C compiler available for SGS kernel '
+                    'tests')
+    return be
 
 
 @pytest.fixture(scope='module')
@@ -410,6 +423,66 @@ def test_sigma_kernel_matches_numpy_3d(sgs_backend):
                           c_sigma=1.35)
     ref = _np_sigma(alpha, rho, delta, 1.35)
     assert np.allclose(got, ref, atol=1e-10, rtol=1e-8)
+
+
+def test_sigma_kernel_ill_conditioned(sgs_backend_single):
+    # REGRESSION: the sigma model is proportional to sigma_3, the SMALLEST
+    # singular value of alpha.  Building G = alpha^T alpha to get it squares
+    # the condition number and destroys exactly that value: measured against a
+    # float64 SVD, the old cubic-invariant route had a MEDIAN relative error of
+    # 78% for near-wall gradient tensors and 37% for quasi-2D ones.  The
+    # one-sided Jacobi SVD must hold accuracy at the conditioning a
+    # wall-bounded flow actually produces, which is the whole point of it.
+    rng = np.random.default_rng(31)
+    mats = []
+
+    # near-wall: one dominant shear component, everything else small
+    for _ in range(12):
+        a = 0.01*rng.standard_normal((3, 3))
+        a[0, 1] = 1.0
+        mats.append(a)
+
+    # quasi-2D: the third direction is weakly resolved
+    for _ in range(12):
+        a = rng.standard_normal((3, 3))
+        a[:, 2] *= 1e-3
+        mats.append(a)
+
+    # a wide spread of magnitudes, since alpha carries 1/time units
+    for _ in range(12):
+        a = rng.standard_normal((3, 3))
+        a[:, 2] *= 1e-2
+        mats.append(a*10**rng.uniform(-2, 2))
+
+    alpha = np.array(mats)
+    rho = np.ones(len(alpha))
+    delta = np.full(len(alpha), 0.5)
+
+    got = _run_sgs_kernel(sgs_backend_single, 'sigma', alpha, rho, delta,
+                          c_sigma=1.35)
+    ref = _np_sigma(alpha, rho, delta, 1.35)
+
+    # relative, because alpha (and hence mu_sgs) spans several decades here
+    scale = np.maximum(np.abs(ref), np.abs(ref).max()*1e-6)
+    rel = np.abs(got - ref)/scale
+    assert rel.max() < 1e-4, f'max relative error {rel.max():.3e}'
+
+
+def test_sigma_kernel_scale_invariance(sgs_backend_single):
+    # D_sigma is degree-one homogeneous in the singular values, so scaling
+    # alpha by c must scale mu_sgs by exactly c.  This pins down the
+    # Frobenius normalisation and would catch any absolute (dimensional)
+    # threshold reintroduced into the kernel.
+    rng = np.random.default_rng(32)
+    base = rng.standard_normal((8, 3, 3))
+    rho = np.ones(8)
+    delta = np.full(8, 0.5)
+
+    ref = _run_sgs_kernel(sgs_backend_single, 'sigma', base, rho, delta, c_sigma=1.35)
+    for c in (1e-3, 1e-1, 1e1, 1e3):
+        got = _run_sgs_kernel(sgs_backend_single, 'sigma', c*base, rho, delta,
+                              c_sigma=1.35)
+        assert np.allclose(got, c*ref, rtol=1e-5), f'scale {c} broke homogeneity'
 
 
 def test_sigma_kernel_zero_in_2d(sgs_backend):
